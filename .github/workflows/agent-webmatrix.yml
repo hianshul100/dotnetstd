@@ -25,7 +25,7 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory migrated -Force | Out-Null
-          Copy-Item source/src migrated/src -Recurse
+          Copy-Item source/* migrated -Recurse
           $project = 'migrated/src/WebMatrix.Data/WebMatrix.Data.csproj'
           Move-Item $project "$project.original"
           @'
