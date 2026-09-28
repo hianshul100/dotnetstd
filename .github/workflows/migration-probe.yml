@@ -21,11 +21,9 @@ jobs:
         shell: pwsh
         run: |
           dotnet build legacy/Newtonsoft.Json/Src/Newtonsoft.Json/Newtonsoft.Json.csproj -c Release *> baseline.log
-          $code = $LASTEXITCODE
-          "Baseline build exit code: $code" | Add-Content $env:GITHUB_STEP_SUMMARY
-          Get-Content baseline.log -Tail 25 | Add-Content $env:GITHUB_STEP_SUMMARY
+          "Baseline build exit code: $LASTEXITCODE" | Add-Content $env:GITHUB_STEP_SUMMARY
           exit 0
-      - name: Attempt isolated netstandard2.0 conversion
+      - name: Convert project and run first build
         shell: pwsh
         run: |
           Copy-Item legacy/Newtonsoft.Json/Src/Newtonsoft.Json migrated -Recurse
@@ -43,10 +41,26 @@ jobs:
             </PropertyGroup>
           </Project>
           '@ | Set-Content $project
-          dotnet build $project -c Release *> migration.log
+          dotnet build $project -c Release *> migration-1.log
+          "First migration build exit code: $LASTEXITCODE" | Add-Content $env:GITHUB_STEP_SUMMARY
+          exit 0
+      - name: Repair Reflection.Emit dependencies and rebuild
+        shell: pwsh
+        run: |
+          $project = 'migrated/Newtonsoft.Json.csproj'
+          $xml = Get-Content $project -Raw
+          $xml = $xml.Replace('</Project>', @'
+            <ItemGroup>
+              <PackageReference Include="System.Reflection.Emit.ILGeneration" Version="4.7.0" />
+              <PackageReference Include="System.Reflection.Emit.Lightweight" Version="4.7.0" />
+            </ItemGroup>
+          </Project>
+          '@)
+          Set-Content $project $xml
+          dotnet build $project -c Release *> migration-2.log
           $code = $LASTEXITCODE
-          "First migration build exit code: $code" | Add-Content $env:GITHUB_STEP_SUMMARY
-          Get-Content migration.log -Tail 60 | Add-Content $env:GITHUB_STEP_SUMMARY
+          "Second migration build exit code: $code" | Add-Content $env:GITHUB_STEP_SUMMARY
+          Get-Content migration-2.log -Tail 50 | Add-Content $env:GITHUB_STEP_SUMMARY
           exit 0
       - uses: actions/upload-artifact@v4
         if: always()
