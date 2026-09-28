@@ -1,0 +1,68 @@
+name: Agent WebMatrix migration trial
+on:
+  workflow_dispatch:
+  push:
+    paths: ['.github/workflows/agent-webmatrix.yml']
+jobs:
+  validate:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Pin source and capture baseline
+        shell: pwsh
+        run: |
+          git clone https://github.com/aspnet/AspNetWebStack.git source
+          git -C source checkout c98468c806db7d72e7a8f1e0179d2d64deff7647
+          git -C source rev-parse HEAD | Out-File source-commit.txt
+          dotnet build source/src/WebMatrix.Data/WebMatrix.Data.csproj -c Release *> baseline.log
+          "Baseline exit: $LASTEXITCODE" | Add-Content $env:GITHUB_STEP_SUMMARY
+          exit 0
+      - name: Apply agent project conversion and compile
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory migrated -Force | Out-Null
+          Copy-Item source/src migrated/src -Recurse
+          $project = 'migrated/src/WebMatrix.Data/WebMatrix.Data.csproj'
+          Move-Item $project "$project.original"
+          @'
+          <Project Sdk="Microsoft.NET.Sdk">
+            <PropertyGroup>
+              <TargetFramework>netstandard2.0</TargetFramework>
+              <AssemblyName>WebMatrix.Data</AssemblyName>
+              <RootNamespace>WebMatrix.Data</RootNamespace>
+              <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+              <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+              <EnableDefaultEmbeddedResourceItems>false</EnableDefaultEmbeddedResourceItems>
+              <DefineConstants>ASPNETWEBPAGES</DefineConstants>
+              <NoWarn>1591</NoWarn>
+            </PropertyGroup>
+            <ItemGroup>
+              <Compile Include="../CommonAssemblyInfo.cs" Link="Properties/CommonAssemblyInfo.cs" />
+              <Compile Include="../CommonResources.Designer.cs" Link="Common/CommonResources.Designer.cs" />
+              <Compile Include="../GlobalSuppressions.cs" Link="Common/GlobalSuppressions.cs" />
+              <Compile Include="*.cs" />
+              <Compile Include="Properties/AssemblyInfo.cs" />
+              <Compile Include="Resources/DataResources.Designer.cs" />
+              <EmbeddedResource Include="../CommonResources.resx" Link="Common/CommonResources.resx" />
+              <EmbeddedResource Include="Resources/DataResources.resx" />
+            </ItemGroup>
+          </Project>
+          '@ | Set-Content $project
+          dotnet build $project -c Release *> migration-1.log
+          $code = $LASTEXITCODE
+          "First migration build exit: $code" | Add-Content $env:GITHUB_STEP_SUMMARY
+          Get-Content migration-1.log -Tail 35 | Add-Content $env:GITHUB_STEP_SUMMARY
+          exit 0
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: webmatrix-agent-trial
+          path: |
+            *.log
+            source-commit.txt
+            migrated/src/WebMatrix.Data/WebMatrix.Data.csproj
+            migrated/src/WebMatrix.Data/WebMatrix.Data.csproj.original
